@@ -1,0 +1,505 @@
+#!/bin/bash
+
+# ----------------------------------------------------------------------
+# WHAT IT DOES
+# ----------------------------------------------------------------------
+# It is a helper to create virtual hosts with Self Signed Certificates
+#
+# @author Alfredo Granda
+#
+# ----------------------------------------------------------------------
+# INSTRUCTIONS
+# ----------------------------------------------------------------------
+# This bash script was created for OSX but should work on other setups
+# with minor tweaks. We assume that APACHE is installed in /etc/apache2
+# but you may change defaults to set your custom setup
+#
+# 1. Set this up in your '/etc/apache2/httpd.conf' file:
+#
+#    # In OSX this line should already exist
+#
+#    Include /private/etc/apache2/other/*.conf
+#
+#    # Make sure there are no permission issues
+#
+#    User <your_username>
+#    Group staff
+#
+#    # You should enable listening to port 443 so add a the line Listen 443
+#
+#    Listen 80
+#    Listen 443
+#
+#    # Enable the following modules:
+#
+#    LoadModule socache_shmcb_module libexec/apache2/mod_socache_shmcb.so
+#    LoadModule ssl_module libexec/apache2/mod_ssl.so
+#    LoadModule vhost_alias_module libexec/apache2/mod_vhost_alias.so
+#    LoadModule rewrite_module libexec/apache2/mod_rewrite.so
+#
+# 2. Make this script executable: `chmod +x vhost`
+#
+# 3. Run `vhost -h` to read documentation or `vhost -h | less -R`
+#
+# ----------------------------------------------------------------------
+
+# Set Defaults
+# ----------------------------------------------------------------------
+APACHE_PATH="/etc/apache2"
+DEFAULT_CONF_EXTENSION="httpd.conf"
+ENV_FILENAME="apache.${DEFAULT_CONF_EXTENSION}"
+PUBLIC_DIR="public"
+DEFAULT_DOMAIN="local.vh"
+ERR_PATHS=( 'storage/logs' 'runtime/logs' '_logs' 'logs' '')
+
+APACHE_VHOSTS_PATH="${APACHE_PATH}/other"
+APACHE_CERTS_PATH="${APACHE_PATH}/certs"
+
+# Run using sudo
+# ----------------------------------------------------------------------
+SOURCE=${BASH_SOURCE[0]}
+DEF_USER=`whoami`
+if [[ "$EUID" -ne 0 ]]
+then
+	sudo ${SOURCE} "$@" -u ${DEF_USER}
+	exit
+fi
+
+# Define the colors for messages
+#
+# Black        0;30     Dark Gray     1;30
+# Red          0;31     Light Red     1;31
+# Green        0;32     Light Green   1;32
+# Brown/Orange 0;33     Yellow        1;33
+# Blue         0;34     Light Blue    1;34
+# Purple       0;35     Light Purple  1;35
+# Cyan         0;36     Light Cyan    1;36
+# Light Gray   0;37     White         1;37
+#
+# ----------------------------------------------------------------------
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[0;33m'
+SILVER='\033[0;37m'
+GRAY='\033[0;30m'
+NC='\033[0m' # No Color
+
+# Set Initial variables
+# ----------------------------------------------------------------------
+CURRENT_DIR=$(basename "$PWD")
+CURRENT_PATH="$PWD"
+
+SERVER_NAME="${CURRENT_DIR}.${DEFAULT_DOMAIN}"
+COMMON_NAME=""
+
+INFO=0
+REMOVE=0
+HELP=0
+
+# Get command line options
+# ----------------------------------------------------------------------
+while getopts "p:d:c:u:irh" OPTION; do
+	case ${OPTION} in
+		p) PUBLIC_DIR="$OPTARG" ;;
+		d) SERVER_NAME="$OPTARG" ;;
+		u) DEF_USER="$OPTARG" ;;
+		i) INFO=1 ;;
+		r) REMOVE=1 ;;
+		h) HELP=1 ;;
+	esac
+done
+
+# Display Help
+# ----------------------------------------------------------------------
+if [[ "${HELP}" -eq 1 ]]
+then
+	echo -e ""
+	echo -e "${CYAN}Introduction${NC}"
+	echo -e "This tool helps you make a folder part of your virtual hosts. "
+	echo -e "The folder must contain a 'public' folder or you may define one."
+	echo -e ""
+
+	echo -e "${CYAN}How it works${NC}"
+	echo -e "  1. Creates a virtual host for ports 80 and 443 in ${CYAN}${APACHE_VHOSTS_PATH}${NC}"
+	echo -e "     This virtual host includes:"
+	echo -e "       - An include to any ${CYAN}*.${DEFAULT_CONF_EXTENSION}${NC} file in the current folder"
+	echo -e "         This way you may create any file that ends with ${CYAN}.${DEFAULT_CONF_EXTENSION}${NC}"
+	echo -e "         to setup your virtual host"
+	echo -e ""
+	echo -e "       - The SSL Certificate to use (one will be created if needed)"
+	echo -e "         For domains with 3 parts (${CYAN}test.${DEFAULT_DOMAIN}${NC}) we will create a wildcard"
+	echo -e "         certificate like ${CYAN}*.${DEFAULT_DOMAIN}${NC} to include all subdomains. For any other"
+	echo -e "         domain like ${CYAN}demo.vh${NC} we will create an explicit certificate for the domain"
+	echo -e ""
+	echo -e "  2. Creates a file called ${CYAN}${ENV_FILENAME}${NC} in your current directory"
+	echo -e "     which contains all of the configuration required:"
+	echo -e ""
+	echo -e "       ${YELLOW}ServerName <folder_name>.${DEFAULT_DOMAIN}"
+	echo -e "       DocumentRoot ./public"
+	echo -e "       ErrorLog <log_path>/error.log"
+	echo -e "       CustomLog <log_path>/access.log${NC}"
+	echo -e ""
+	echo -e "     The <log_path> will be calculated based on common structures for frameweworks"
+	echo -e "     like ${ERR_PATHS[@]}"
+	echo -e ""
+	echo -e "  3. Adds ${CYAN}*.${DEFAULT_CONF_EXTENSION}${NC} to your ${CYAN}.gitignore${NC} file or creates a new .gitignore"
+	echo -e ""
+	echo -e "  4. Adds ${CYAN}127.0.0.1 domain.${DEFAULT_DOMAIN}${NC} to your ${CYAN}/etc/hosts${NC} file"
+	echo -e ""
+	echo -e "${CYAN}Upon Removal (with the -r flag)${NC}"
+	echo -e "  We will remove everything except the SSL certificates and registrations on your KeyChain"
+	echo -e "  because there may be other domains using this certificates. Also if you added lines to"
+	echo -e "  your apache.${DEFAULT_CONF_EXTENSION} then they will be kept."
+	echo -e ""
+
+	echo -e "${CYAN}Parameters${NC}"
+	echo -e "  ${YELLOW}-p${NC}\tSet the public directory to use (default: 'public')"
+	echo -e ""
+	echo -e "  ${YELLOW}-d${NC}\tThe name of the domain to use (default: <folder_name>.${DEFAULT_DOMAIN})."
+	echo -e "    \tWhen specified you should use the full name eg. test.site.vh"
+	echo -e ""
+	echo -e "  ${YELLOW}-i${NC}\tShow info about the virtual host"
+	echo -e ""
+	echo -e "  ${YELLOW}-h${NC}\tShow help information"
+	echo -e ""
+	echo -e "  ${YELLOW}-r${NC}\tRemove the folder as a virtual host"
+	echo -e ""
+
+	echo -e "${CYAN}Examples${NC}"
+	echo -e "  \$ ${YELLOW}vhost${NC}"
+	echo -e "\tIf called inside a folder called 'test' will create a virtual host at"
+	echo -e "\t${CYAN}http://test.${DEFAULT_DOMAIN}${NC} with DocumentRoot at ${CYAN}./test/public${NC}"
+	echo -e ""
+
+	echo -e "  \$ ${YELLOW}vhost -p public_html${NC}"
+	echo -e "\tIf called inside a folder called 'test' will create a virtual host at"
+	echo -e "\t${CYAN}http://test.${DEFAULT_DOMAIN}${NC} with DocumentRoot at ${CYAN}./test/public_html${NC}"
+	echo -e ""
+
+	echo -e "  \$ ${YELLOW}vhost -p ''${NC}"
+	echo -e "\tIf called inside a folder called 'test' will create a virtual host at"
+	echo -e "\t${CYAN}http://test.${DEFAULT_DOMAIN}${NC} with DocumentRoot at ${CYAN}./test${NC}"
+	echo -e ""
+
+	echo -e "  \$ ${YELLOW}vhost -d sample.mydomain.vh${NC}"
+	echo -e "\tIf called inside a folder called 'test' will create a virtual host at"
+	echo -e "\t${CYAN}http://sample.mydomain.vh${NC} with DocumentRoot at ${CYAN}./test/public${NC}"
+	echo -e ""
+
+	echo -e "\tThis will additionally create a new SSL certificate in ${CYAN}${APACHE_CERTS_PATH}${NC} called"
+	echo -e "\tcalled ${CYAN}*.mydomain.vh.crt${NC} and will automatically add it to your KeyChain to"
+	echo -e "\tget a green bar on your browser. If you do not see a green bar make sure that"
+	echo -e "\t${CYAN}mydomain.vh${NC} is being excluded from your antivirus/firewall"
+	echo -e ""
+
+	echo -e "  \$ ${YELLOW}vhost -r${NC}"
+	echo -e "\tThis will remove the virtual host and its configuration"
+	echo -e ""
+	
+	exit 0
+fi
+
+# Set the name to use for the virtual host configuration file.
+# If the file already exists then skip creation
+# ----------------------------------------------------------------------
+VHOSTS_FILENAME=""
+IFS='/' read -r -a PARTS <<< "${CURRENT_PATH}"
+for name in "${PARTS[@]}"
+do
+	if [[ ! -z "${name}" ]]
+	then
+		VHOSTS_FILENAME="${VHOSTS_FILENAME}${name}."
+	fi
+done
+VHOSTS_FILENAME="${VHOSTS_FILENAME}conf"
+VHOSTS_FILE="${APACHE_VHOSTS_PATH}/${VHOSTS_FILENAME}"
+
+# Set the path of the public folder and make sure that it exists
+# ----------------------------------------------------------------------
+if [[ -z "${PUBLIC_DIR}" ]]
+then
+	PUBLIC_PATH="${CURRENT_PATH}"
+else
+	PUBLIC_PATH="${CURRENT_PATH}/${PUBLIC_DIR}"
+fi
+
+if [[ ! -d "${PUBLIC_PATH}" ]]
+then
+	echo -e "${RED}Error: ${NC}Directory '${YELLOW}${PUBLIC_FOLDER}${NC}' not found. ${CYAN}Create one or specify the name to use with the -p option${NC}"
+	exit 1
+fi
+
+# If already a vhost then try to detect the old server name
+# ----------------------------------------------------------------------
+OLD_SERVER_NAME="${SERVER_NAME}"
+if [[ -f "${ENV_FILENAME}" ]]
+then
+	OLD_SERVER_NAME=`cat ${ENV_FILENAME} | grep ServerName | cut -d " " -f 2`
+	if [[ -z "${OLD_SERVER_NAME}" ]]
+	then
+		OLD_SERVER_NAME="${SERVER_NAME}"
+	else
+		if [[ "${OLD_SERVER_NAME}" != "${SERVER_NAME}" ]]
+		then
+			if [[ "${REMOVE}" -eq 0 ]]
+			then
+				echo -e "${RED}Error: ${NC}The domain name '${YELLOW}${SERVER_NAME}${NC}' is different from the previous '${YELLOW}${OLD_SERVER_NAME}${NC}'."
+				echo -e "${CYAN}Run again with the same domain using the -d option or remove the vhost with the -r option${NC}"
+				exit 1
+			fi
+		fi
+	fi
+fi
+
+# Show information
+# ----------------------------------------------------------------------
+if [[ "${INFO}" -eq 1 ]]
+then
+	echo ""
+	if [[ -f "${VHOSTS_FILE}" ]]
+	then
+		echo -e " VHost File: ${CYAN}${VHOSTS_FILE}${NC}"
+	else
+		echo -e " ${RED}VHost file not found${NC}. Run ${YELLOW}vhost${NC} to create one"
+		echo ""
+		exit 1
+	fi
+	if [[ -f "${ENV_FILENAME}" ]]
+	then
+		echo -e " Local File: ${CYAN}${ENV_FILENAME}${NC}"
+	else
+		echo -e " Local File: ${RED}not found${NC}"
+	fi
+	echo -e "Server Name: ${CYAN}${OLD_SERVER_NAME}${NC}"
+	echo ""
+	exit 0
+fi
+
+# Always clean VHOSTS_FILE first
+# ----------------------------------------------------------------------
+if [[ -f "${ENV_FILENAME}" ]]
+then
+	sed "/ServerName/d" ${ENV_FILENAME} | sed "/DocumentRoot/d" | sed "/ErrorLog/d" | sed "/CustomLog/d" >> ${ENV_FILENAME}.new
+	rm ${ENV_FILENAME}
+	cp ${ENV_FILENAME}.new ${ENV_FILENAME}
+	rm ${ENV_FILENAME}.new
+fi
+
+# Clean previous configuration
+# ----------------------------------------------------------------------
+# Remove the vhosts config if found
+if [[ -f "${VHOSTS_FILE}" ]]
+then
+	rm ${VHOSTS_FILE}
+	if [[ "${REMOVE}" -eq 1 ]]
+	then
+		echo "- Removed ${VHOSTS_FILE}"
+	fi
+fi
+
+# Remove from /etc/hosts
+if [[ -f /etc/hosts.new ]]
+then
+	rm /etc/hosts.new
+fi
+sed "/127.0.0.1 ${OLD_SERVER_NAME}/d" /etc/hosts >> /etc/hosts.new
+rm /etc/hosts
+cp /etc/hosts.new /etc/hosts
+rm /etc/hosts.new
+
+if [[ "${REMOVE}" -eq 1 ]]
+then
+	echo "- Removed ${OLD_SERVER_NAME} from /etc/hosts"
+fi
+
+# Remove apache.${DEFAULT_CONF_EXTENSION} if is not empty
+if [[ "${REMOVE}" -eq 1 ]]
+then
+	if [[ -f "${ENV_FILENAME}" ]]
+	then
+		NOT_EMPTY_LINES_COUNT=`cat ${ENV_FILENAME} | sed '/^\s*$/d' | wc -l`
+		if [[ "${NOT_EMPTY_LINES_COUNT}" -eq 0 ]]
+		then
+			rm ${ENV_FILENAME}
+			echo "- Removed ${ENV_FILENAME}"
+		else
+			echo "- ${ENV_FILENAME} is not empty. You should remove it manually"
+		fi
+	fi
+fi
+
+if [[ "${REMOVE}" -eq 1 ]]
+then
+	# Restart apache only if this will is a remove action
+	sudo apachectl -k restart
+	echo -e "- ${CYAN}Apache restarted${NC}"
+	echo ""
+	exit 0
+fi
+
+# Determine the CommonName for the SSL Certificate
+# ----------------------------------------------------------------------
+if [[ -z "${COMMON_NAME}" ]]
+then
+	IFS='.' read -r -a PARTS <<< "${SERVER_NAME}"
+	DP="${#PARTS[@]}"
+
+	if [[ "$DP" -lt 1 ]]
+	then
+		COMMON_NAME="${DEFAULT_DOMAIN}"
+	elif [[ "$DP" -lt 2 ]]
+	then
+		COMMON_NAME="${PARTS[0]}"
+	elif [[ "$DP" -lt 3 ]]
+	then
+		COMMON_NAME="${PARTS[0]}.${PARTS[1]}"
+	elif [[ "$DP" -lt 4 ]]
+	then
+		COMMON_NAME="*.${PARTS[1]}.${PARTS[2]}"
+	else
+		COMMON_NAME="${SERVER_NAME}"
+	fi
+fi
+
+# Make sure that the certificate folder exists
+# ----------------------------------------------------------------------
+if [[ ! -d "${APACHE_CERTS_PATH}" ]]
+then
+	mkdir "${APACHE_CERTS_PATH}"
+fi
+
+# Create the certificate if it does not exist
+# ----------------------------------------------------------------------
+CERT_BASE_NAME="${APACHE_CERTS_PATH}/${COMMON_NAME}"
+if [[ ! -f "${CERT_BASE_NAME}.crt" ]]
+then
+	ssh-keygen -q -N '' -f ${CERT_BASE_NAME}.key
+	openssl req -new -key ${CERT_BASE_NAME}.key -out ${CERT_BASE_NAME}.csr -subj "/C=PE/ST=Lima/L=Lima/O=Test/OU=IT/CN=${COMMON_NAME}"
+	openssl x509 -req -days 365 -in ${CERT_BASE_NAME}.csr -signkey ${CERT_BASE_NAME}.key -out ${CERT_BASE_NAME}.crt
+	openssl rsa -in ${CERT_BASE_NAME}.key -out ${CERT_BASE_NAME}.key
+	security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${CERT_BASE_NAME}.crt
+
+	echo -e "- ${CYAN}Certificate created in ${CERT_BASE_NAME}${NC}"
+	echo -e "- ${YELLOW}The certificate has been added to the KeyChain. If you have a firewall exclude the domain so that SSL gives a green bar${NC}"
+else
+	echo -e "- ${YELLOW}Reusing certificate in ${CERT_BASE_NAME}${NC}"
+fi
+
+# Create the Virtual host configuration file
+# ----------------------------------------------------------------------
+if [[ ! -f "${VHOSTS_FILE}" ]]
+then
+	echo "<VirtualHost *:80>" >> ${VHOSTS_FILE}
+	echo "    IncludeOptional \"${CURRENT_PATH}/*.${DEFAULT_CONF_EXTENSION}\"" >> ${VHOSTS_FILE}
+	echo "    <Directory \"${CURRENT_PATH}\">" >> ${VHOSTS_FILE}
+    echo "        AllowOverride All" >> ${VHOSTS_FILE}
+	echo "        Options Indexes FollowSymLinks" >> ${VHOSTS_FILE}
+    echo "        Require all granted" >> ${VHOSTS_FILE}
+    echo "    </Directory>" >> ${VHOSTS_FILE}
+	echo "</VirtualHost>" >> ${VHOSTS_FILE}
+	echo "" >> ${VHOSTS_FILE}
+	echo "<VirtualHost *:443>" >> ${VHOSTS_FILE}
+	echo "    IncludeOptional \"${CURRENT_PATH}/*.${DEFAULT_CONF_EXTENSION}\"" >> ${VHOSTS_FILE}
+	echo "    SSLEngine on" >> ${VHOSTS_FILE}
+	echo "    SSLCertificateFile ${APACHE_CERTS_PATH}/${COMMON_NAME}.crt" >> ${VHOSTS_FILE}
+	echo "    SSLCertificateKeyFile ${APACHE_CERTS_PATH}/${COMMON_NAME}.key" >> ${VHOSTS_FILE}
+	echo "    <Directory \"${CURRENT_PATH}\">" >> ${VHOSTS_FILE}
+    echo "        AllowOverride All" >> ${VHOSTS_FILE}
+	echo "        Options Indexes FollowSymLinks" >> ${VHOSTS_FILE}
+    echo "        Require all granted" >> ${VHOSTS_FILE}
+    echo "    </Directory>" >> ${VHOSTS_FILE}
+	echo "</VirtualHost>" >> ${VHOSTS_FILE}
+
+	echo -e "- ${CYAN}Created config in ${VHOSTS_FILE}${NC}"
+else
+	echo -e "- ${YELLOW}Reusing config in ${VHOSTS_FILE}${NC}"
+fi
+
+# Create the environment variable file if it does not exist
+# ----------------------------------------------------------------------
+if [[ ! -f "${ENV_FILENAME}" ]]
+then
+	echo -n "" >> ${ENV_FILENAME}
+	chown ${DEF_USER} ${ENV_FILENAME}
+
+	echo -e "- ${CYAN}Created local config in ${ENV_FILENAME}${NC}"
+fi
+
+# Add the ServerName if not present
+if ! grep -qFx "ServerName ${SERVER_NAME}" ${ENV_FILENAME}
+then
+	echo "ServerName ${SERVER_NAME}" >> ${ENV_FILENAME}
+
+	echo -e "- ${CYAN}Added ServerName ${SERVER_NAME} to ${ENV_FILENAME}${NC}"
+fi
+
+# Add the DocumentRoot if not present
+if ! grep -qFx "DocumentRoot ${PUBLIC_PATH}" ${ENV_FILENAME}
+then
+	echo "DocumentRoot ${PUBLIC_PATH}" >> ${ENV_FILENAME}
+
+	echo -e "- ${CYAN}Added DocumentRoot ${PUBLIC_PATH} to ${ENV_FILENAME}${NC}"
+fi
+
+# Add the ErrorLog (Tries to find a proper place or at root) if not present
+for (( i=0; i<${#ERR_PATHS[@]}; i++)); do
+	if [[ -z ${ERR_PATHS[${i}]} ]]
+	then
+		ERR_PATH="${CURRENT_PATH}"
+	else
+		ERR_PATH="${CURRENT_PATH}/${ERR_PATHS[${i}]}"
+	fi
+	
+	if [[ -d "${ERR_PATH}" ]]
+	then
+		if ! grep -qFx "ErrorLog ${ERR_PATH}/error.log" ${ENV_FILENAME}
+		then
+			echo "ErrorLog ${ERR_PATH}/error.log" >> ${ENV_FILENAME}
+			echo -e "- ${CYAN}Added ErrorLog ${ERR_PATH}/error.log to ${ENV_FILENAME}${NC}"
+		fi
+
+		if ! grep -qFx "CustomLog ${ERR_PATH}/access.log common" ${ENV_FILENAME}
+		then
+			echo "CustomLog ${ERR_PATH}/access.log common" >> ${ENV_FILENAME}
+			echo -e "- ${CYAN}Added CustomLog ${ERR_PATH}/error.log to ${ENV_FILENAME}${NC}"
+		fi
+		break
+	fi
+done
+
+# Create a .gitignore file if not present
+# ----------------------------------------------------------------------
+if [[ ! -f ".gitignore" ]]
+then
+	echo -n "" >> .gitignore
+	chown $DEF_USER .gitignore
+	echo -e "- ${CYAN}Created .gitignore${NC}"
+fi
+
+# Add the Exception to gitignore if not present
+if ! grep -qFx "*.${DEFAULT_CONF_EXTENSION}" .gitignore
+then
+	echo "*.${DEFAULT_CONF_EXTENSION}" >> .gitignore
+	echo -e "- ${CYAN}Added *.${DEFAULT_CONF_EXTENSION} to .gitignore${NC}"
+fi
+
+# Create the alias in /etc/hosts
+# ----------------------------------------------------------------------
+if ! grep -qFx "127.0.0.1 ${SERVER_NAME}" /etc/hosts
+then
+	echo "127.0.0.1 ${SERVER_NAME}" >> /etc/hosts
+	echo -e "- ${CYAN}Added ${SERVER_NAME} to /etc/hosts${NC}"
+fi
+
+# Restart apache
+# ----------------------------------------------------------------------
+sudo apachectl -k restart
+echo -e "- ${CYAN}Apache restarted${NC}"
+
+
+# Show a message
+# ----------------------------------------------------------------------
+echo ""
+echo -e "  ${GREEN}Site available at http://${SERVER_NAME}${NC}"
+echo ""
