@@ -215,19 +215,13 @@ done
 VHOSTS_FILENAME="${VHOSTS_FILENAME}conf"
 VHOSTS_FILE="${APACHE_VHOSTS_PATH}/${VHOSTS_FILENAME}"
 
-# Set the path of the public folder and make sure that it exists
+# Set the path of the public folder
 # ----------------------------------------------------------------------
 if [[ -z "${PUBLIC_DIR}" ]]
 then
 	PUBLIC_PATH="${CURRENT_PATH}"
 else
 	PUBLIC_PATH="${CURRENT_PATH}/${PUBLIC_DIR}"
-fi
-
-if [[ ! -d "${PUBLIC_PATH}" ]]
-then
-	echo -e "${RED}Error: ${NC}Directory '${YELLOW}${PUBLIC_FOLDER}${NC}' not found. ${CYAN}Create one or specify the name to use with the -p option${NC}"
-	exit 1
 fi
 
 # If already a vhost then try to detect the old server name
@@ -244,9 +238,12 @@ then
 		then
 			if [[ "${REMOVE}" -eq 0 ]]
 			then
-				echo -e "${RED}Error: ${NC}The domain name '${YELLOW}${SERVER_NAME}${NC}' is different from the previous '${YELLOW}${OLD_SERVER_NAME}${NC}'."
-				echo -e "${CYAN}Run again with the same domain using the -d option or remove the vhost with the -r option${NC}"
-				exit 1
+				if [[ "${INFO}" -eq 0 ]]
+				then
+					echo -e "${RED}Error: ${NC}The domain name '${YELLOW}${SERVER_NAME}${NC}' is different from the previous '${YELLOW}${OLD_SERVER_NAME}${NC}'."
+					echo -e "${CYAN}Run again with the same domain using the -d option or remove the vhost with the -r option${NC}"
+					exit 1
+				fi
 			fi
 		fi
 	fi
@@ -274,6 +271,14 @@ then
 	echo -e "Server Name: ${CYAN}${OLD_SERVER_NAME}${NC}"
 	echo ""
 	exit 0
+fi
+
+# Make sure that the public folder exists
+# ----------------------------------------------------------------------
+if [[ ! -d "${PUBLIC_PATH}" ]]
+then
+	echo -e "${RED}Error: ${NC}Directory '${YELLOW}${PUBLIC_DIR}${NC}' not found. ${CYAN}Create one or specify the name to use with the -p option${NC}"
+	exit 1
 fi
 
 # Always clean VHOSTS_FILE first
