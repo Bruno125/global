@@ -50,7 +50,7 @@ DEFAULT_CONF_EXTENSION="httpd.conf"
 ENV_FILENAME="apache.${DEFAULT_CONF_EXTENSION}"
 PUBLIC_DIR="public"
 DEFAULT_DOMAIN="local.vh"
-ERR_PATHS=( 'storage/logs' 'runtime/logs' '_logs' 'logs' '')
+ERR_PATHS=( 'storage/logs' 'runtime/logs' 'runtime' '_logs' 'logs' '')
 
 APACHE_VHOSTS_PATH="${APACHE_PATH}/other"
 APACHE_CERTS_PATH="${APACHE_PATH}/certs"
