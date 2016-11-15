@@ -22,7 +22,7 @@
 DEFAULT_CONF_EXTENSION="httpd.conf"
 ENV_FILENAME_PREFIX="apache"
 DEFAULT_DOMAIN="local.vh"
-ERR_PATHS=( 'storage/logs' 'runtime/logs' '_logs' 'logs' '')
+ERR_PATHS=( 'storage/logs' 'runtime/logs' 'runtime' '_logs' 'logs' '')
 PUBLIC_FOLDER_NAMES=( 'public' 'public_html' 'www' '')
 HOSTS_FILE="/etc/hosts"
 OTHER_FOLDER="other"
