@@ -170,6 +170,9 @@
 
 	# Same as `f` but end with a git status: $ git fo
 	fcs = "!git fc && git ss"
+	
+	# Fetch origin $(branch), then check out to that $(branch)
+	fco = "!f() { git fetch origin ${1}; git co ${1}; }; f"
 
 # ------------------------------------------------------------
 # Pulling
