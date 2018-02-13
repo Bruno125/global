@@ -267,6 +267,14 @@
 	#
 	wipe = !git add -A && git commit -qm 'WIPE SAVEPOINT' && git reset HEAD~1 --hard
 
+	#
+	# Clean up branches
+	#
 	# 1. Deletes any local branch that has already been merged into master or develop
 	# 2. Prunes the references to those branches
+
+	# WARNING:
+	# This command will delete any branch whose name matches any branch that has previously been merged. 
+	# So, if you are using a branch name which was already been used before, your local branch (with any
+	# additional change you may have) will be gone.
 	cu = !git branch --merged | egrep -v \"(^\\*|master|develop)\" | xargs git branch -d && git remote prune origin
