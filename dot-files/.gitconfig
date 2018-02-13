@@ -266,3 +266,7 @@
 	# Usage: $ git wipe
 	#
 	wipe = !git add -A && git commit -qm 'WIPE SAVEPOINT' && git reset HEAD~1 --hard
+
+	# 1. Deletes any local branch that has already been merged into master or develop
+	# 2. Prunes the references to those branches
+	cu = !git branch --merged | egrep -v \"(^\\*|master|develop)\" | xargs git branch -d && git remote prune origin
