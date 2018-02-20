@@ -138,6 +138,10 @@
 	# Same as `a` but include new files also: $ git aa
 	aa = "!git add -A && git ss"
 
+	# Unstaging a file: $ git unstage myfile
+	# equivalent to: $ git reset HEAD myfile
+	unstage = "reset HEAD --"
+
 	# Commit shortcut with message: $ git cm "Commit message"
 	cm = commit -m
 
