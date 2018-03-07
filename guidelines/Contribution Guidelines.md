@@ -6,21 +6,26 @@
 
 Si vas a realizar un PR para alguno de los proyectos, se sugiere:
 
+- Agregar como _Reviewers_ a las personas encargadas de revisar tu PR.
 - Estar consciente de las guías de estilo para el proyecto en el que se está trabajando.
 - Estar consciente de los patrones de diseño y arquitectónicos de cada proyecto (si es que los hubiera) y aplicarlos.
 - Especificar **en el título del PR** el tablero y id de la tarea en Jira. Ejemplo: `[MOBILE-123] Descripcion breve` 
 - Antes de commitear, revisar bien tus cambios. Puedes utilizar:
      - `git add -p` para verificar uno por uno los cambios que añadirás al commit.
      - `CMD + K` en tu IDE (si usas IntelliJ) para realizar una operación similar, pero visualmente.
+- Recuerda que mientras más cambios tenga tu PR, más tiempo le tomará al revisor aprobar los cambios. Solo realiza los cambios que sean absolutamente necesarios. Si quieres realizar mejoras que no están directamente relacionadas a la tarea que estás realizando, crea un nuevo PR.
 - Si se realizan cambios visuales, adjuntar capturas de pantalla / gifs de cómo se ve el resultado final.
 - Si se tomaron decisiones de diseño (de software) o validaciones importantes, especificar porqué se tomó dicha decisión y bajo qué contexto. Esto no se realiza porque el código esté mal escrito, sino porque se quiere dar un mejor contexto a la persona que revisa el cambio.
-- Escribir código 100% correcto siempre es imposible. Si te solicitan correcciones, no te lo tomes a mal! La retroalimentación que recibimos en los PRs son excelentes para aprender y mejorar.
+- Al agregar una nueva dependencia, explicar para qué la agregas y porqué elegiste esa librería.
+- Escribir código 100% correcto siempre, es imposible. Si te solicitan correcciones, no te lo tomes a mal! La retroalimentación que recibimos en los PRs son excelentes para aprender y mejorar.
+
 
 ## Para revisores
 
 Si por el otro lado, eres el encargado de revisar los cambios del PR, se sugiere:
 
 - Asegurarse de que los cambios realizados cumplan con la guía de estilo de cada proyecto. Es totalmente válido rechazar un PR si es que no se sigue la guía de estilos.
+- Verificar si el branch de destino es el correcto de acuerdo al Git branching model del equipo.
 - Solicitar que se agregue una descripción para el PR, si es que lo considera necesario.
 - Si ves código que no entiendes, es válido preguntar al creador del PR el porqué de los cambios que realizó. Si lo consideras necesario, solicítale añadir comentarios o refactorizar su código.
 - Si ves código que funciona, pero tienes una sugerencia para hacerlo mejor, hazla! Y de ser posible, añade un snippet del código que estás sugiriendo. 
